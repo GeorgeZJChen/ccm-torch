@@ -103,6 +103,13 @@ class Net(torch.nn.Module):
     self.optimizer = torch.optim.SGD([param for name, param in self.named_parameters() if 'vgg' not in name], lr=1e-4, momentum=0.9)
     self.vgg_optimizer = torch.optim.SGD(self.vgg.parameters(), lr=1e-5, momentum=0.9)
 
+    for name, param in self.named_parameters():
+      if param.requires_grad:
+        if 'weight' in name:
+          torch.nn.init.xavier_uniform(param)
+        if 'bias' in name:
+          torch.nn.init.constant_(param, 0.0)
+
   def forward(self, input, dropout=0):
 
     layer10 = conv_layer(self.layer10, self.vgg(input), act=leaky_relu, dropout=dropout)
