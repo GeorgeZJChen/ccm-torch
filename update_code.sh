@@ -4,8 +4,8 @@ rm data.py
 rm model.py
 rm test.py
 rm train.py
-wget https://georgezjchen.github.io/ccm/functions.py
-wget https://georgezjchen.github.io/ccm/data.py
-wget https://georgezjchen.github.io/ccm/model.py
-wget https://georgezjchen.github.io/ccm/test.py
-wget https://georgezjchen.github.io/ccm/train.py
+wget https://georgezjchen.github.io/ccm-torch/functions.py
+wget https://georgezjchen.github.io/ccm-torch/data.py
+wget https://georgezjchen.github.io/ccm-torch/model.py
+wget https://georgezjchen.github.io/ccm-torch/test.py
+wget https://georgezjchen.github.io/ccm-torch/train.py
