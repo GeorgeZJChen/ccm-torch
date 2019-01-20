@@ -1,153 +1,278 @@
 from __future__ import print_function, division
-import tensorflow as tf
-import numpy as np
+import torch
+import os
 
-def conv(kernel_size, input, filters, padding='same', strides=(1,1), name=None, act=tf.nn.relu, dilation=1, dropout=None, training=True):
-  out = tf.layers.conv2d(input, filters, kernel_size,
-                        strides = strides,
-                        dilation_rate = 1,
-                        activation=act,
-                        padding=padding,
-                        kernel_initializer=tf.contrib.layers.xavier_initializer(),
-                        kernel_regularizer=tf.contrib.layers.l2_regularizer(scale=0.1),
-                        name=name)
+def conv(kernel_size, in_channels, filters, padding=(1,1), strides=(1,1), dilation=1, name=None, act=None, dropout=None):
+  if kernel_size==1:
+    padding=0
+  layers = []
+  layers.append(torch.nn.Conv2d(in_channels, filters, kernel_size, strides, padding, dilation))
   if dropout is not None:
-    out = tf.layers.dropout(out, dropout, training=training)
-  return out
-def conv_t(kernel_size, input, filters, strides=2, padding='same', act=tf.nn.leaky_relu, dropout=None, training=True):
-  out = tf.layers.conv2d_transpose(input, filters, kernel_size, padding=padding, strides=strides, activation=act,
-                                    kernel_initializer=tf.contrib.layers.xavier_initializer(),
-                                   kernel_regularizer=tf.contrib.layers.l2_regularizer(scale=0.1),)
+    layers.append(torch.nn.Dropout(dropout))
+  if act is not None:
+    layers.append(act)
+  return torch.nn.Sequential(*layers)
+def conv_t(kernel_size, in_channels, filters, strides=2, padding=1, act=None, dropout=None, training=True):
+  layers = []
+  layers.append(torch.nn.ConvTranspose2d(in_channels, filters, kernel_size, strides, padding=padding, output_padding=0))
   if dropout is not None:
-    out = tf.layers.dropout(out, dropout, training=training)
+    layers.append(torch.nn.Dropout(dropout))
+  if act is not None:
+    layers.append(act)
+  return torch.nn.Sequential(*layers)
+def conv_layer(conv_op, input, act=None, dropout=None):
+  out = conv_op(input)
+  if act is not None:
+    out = act(out)
+  if dropout is not None:
+    out = torch.nn.functional.dropout(out, p=dropout)
   return out
-def maxpool(kernel_size, input, strides=2):
-  return tf.layers.max_pooling2d(input, kernel_size, strides, padding='same')
+def maxpool(kernel_size, strides=2):
+  return torch.nn.MaxPool2d(kernel_size, strides)
+def concat(tensors, axis=1):
+  return torch.cat(tensors, axis)
+def leaky_relu(input):
+  return torch.nn.functional.leaky_relu_(input, 0.2)
 def abs_loss(predict, target):
-  loss = tf.losses.absolute_difference(target, predict, reduction=tf.losses.Reduction.NONE)
-  return tf.reduce_mean(loss)
-def squared_loss(predict, target):
-  loss = tf.losses.mean_squared_error(target, predict, reduction=tf.losses.Reduction.NONE)
-  return tf.reduce_mean(loss)
-def encoder(input, training, dropout=0.3):
-  # input: 384x512
-  layer1 = conv(3, input, 64, name='vgg_conv_1')
-  layer2 = conv(3, layer1, 64, name='vgg_conv_2')
-  pool = maxpool(2, layer2)
-  layer3 = conv(3, pool, 128, name='vgg_conv_3')
-  layer4 = conv(3, layer3, 128, name='vgg_conv_4')
-  pool = maxpool(2, layer4)
-  layer5 = conv(3, pool, 256, name='vgg_conv_5')
-  layer6 = conv(3, layer5, 256, name='vgg_conv_6')
-  layer7 = conv(3, layer6, 256, name='vgg_conv_7') # 96x128 4
-  pool = maxpool(2, layer7)
-  layer8 = conv(3, pool, 512, name='vgg_conv_8')
-  layer9 = conv(3, layer8, 512, name='vgg_conv_9')
-  layer10 = conv(3, layer9, 512, name='vgg_conv_10') # 48x64 8
+  loss = torch.abs(predict - target)
+  loss = torch.mean(loss)
+  return loss
+class Net(torch.nn.Module):
+  def __init__(self):
+    super(Net, self).__init__()
+    layers = []
+    layers.append(conv(3, 3, 64, act=torch.nn.ReLU()))
+    layers.append(conv(3, 64, 64, act=torch.nn.ReLU()))
+    layers.append(maxpool(2))
+    layers.append(conv(3, 64, 128, act=torch.nn.ReLU()))
+    layers.append(conv(3, 128, 128, act=torch.nn.ReLU()))
+    layers.append(maxpool(2))
+    layers.append(conv(3, 128, 256, act=torch.nn.ReLU()))
+    layers.append(conv(3, 256, 256, act=torch.nn.ReLU()))
+    layers.append(conv(3, 256, 256, act=torch.nn.ReLU()))
+    layers.append(maxpool(2))
+    layers.append(conv(3, 256, 512, act=torch.nn.ReLU()))
+    layers.append(conv(3, 512, 512, act=torch.nn.ReLU()))
+    layers.append(conv(3, 512, 512, act=torch.nn.ReLU()))
+    self.vgg = torch.nn.Sequential(*layers)
 
-  layer10 = conv(3, layer10, 256, strides=1, dropout=dropout, training=training, act=tf.nn.leaky_relu) # 48x64 8
-  print('10', layer10.shape) # 24x32 16
+    self.layer10 = conv(3, 512, 256)
 
-  layer11 = conv(3, layer10, 512, strides=2, dropout=dropout, training=training, act=tf.nn.leaky_relu)
-  layer11 = conv(3, layer11, 256, strides=1, dropout=dropout, training=training, act=tf.nn.leaky_relu)
-  print('11', layer11.shape) # 24x32 16
-  layer12 = conv(3, layer11, 512, strides=2, dropout=dropout, training=training, act=tf.nn.leaky_relu)
-  layer12 = conv(3, layer12, 256, strides=1, dropout=dropout, training=training, act=tf.nn.leaky_relu)
-  print('12', layer12.shape) # 12x16 32
-  layer13 = conv(3, layer12, 512, strides=2, dropout=dropout, training=training, act=tf.nn.leaky_relu)
-  layer13 = conv(3, layer13, 256, strides=1, dropout=dropout, training=training, act=tf.nn.leaky_relu)
-  print('13', layer13.shape) # 6x8  64
-  layer14 = conv(3, layer13, 512, strides=2, dropout=dropout, training=training, act=tf.nn.leaky_relu)
-  layer14 = conv(3, layer14, 256, strides=1, dropout=dropout, training=training, act=tf.nn.leaky_relu)
-  print('14', layer14.shape) # 3x4  128
-  layer15 = conv((3,4), layer14, 1024, padding='valid', act=tf.nn.leaky_relu)
-  print('15', layer15.shape) # 1  a
+    self.layer11_0 = conv(3, 256, 512, strides=2)
+    self.layer11 = conv(3, 512, 256)
 
-  return layer10, layer11, layer12, layer13, layer14, layer15
-def decoder(inputs, training, dropout):
-  layer10, layer11, layer12, layer13, layer14, layer15 = inputs
+    self.layer12_0 = conv(3, 256, 512, strides=2)
+    self.layer12 = conv(3, 512, 256)
 
-  out15 = conv(1, layer15, 1, act=tf.nn.leaky_relu)
-  print('out15', out15.shape)
+    self.layer13_0 = conv(3, 256, 512, strides=2)
+    self.layer13 = conv(3, 512, 256)
 
-  layer = conv_t((3,4), layer15, 256, padding='valid', strides=1, dropout=dropout, training=training)
-  layer = tf.concat([layer, layer14], axis=3)
-  out14 = conv(1, layer, 1, act=tf.nn.leaky_relu)
-  print('out14', out14.shape)
+    self.layer14_0 = conv(3, 256, 512, strides=2)
+    self.layer14 = conv(3, 512, 256)
 
-  layer = conv_t((3,4), layer15, 256, padding='valid', strides=1, dropout=dropout, training=training)
-  layer = tf.concat([layer, layer14], axis=3)
-  layer = conv_t(4, layer, 256, dropout=dropout, training=training)
-  layer = tf.concat([layer, layer13], axis=3)
-  out13 = conv(1, layer, 1, act=tf.nn.leaky_relu)
-  print('out13', out13.shape)
+    self.layer15 = conv((3,4), 256, 1024, padding=0)
 
-  layer = conv_t((3,4), layer15, 256, padding='valid', strides=1, dropout=dropout, training=training)
-  layer = tf.concat([layer, layer14], axis=3)
-  layer = conv_t(4, layer, 256, dropout=dropout, training=training)
-  layer = tf.concat([layer, layer13], axis=3)
-  layer = conv_t(4, layer, 256, dropout=dropout, training=training)
-  layer = tf.concat([layer, layer12], axis=3)
-  out12 = conv(1, layer, 1, act=tf.nn.leaky_relu)
-  print('out12', out12.shape)
 
-  layer = conv_t((3,4), layer15, 256, padding='valid', strides=1, dropout=dropout, training=training)
-  layer = tf.concat([layer, layer14], axis=3)
-  layer = conv_t(4, layer, 256, dropout=dropout, training=training)
-  layer = tf.concat([layer, layer13], axis=3)
-  layer = conv_t(4, layer, 256, dropout=dropout, training=training)
-  layer = tf.concat([layer, layer12], axis=3)
-  layer = conv_t(4, layer, 256, dropout=dropout, training=training)
-  layer = tf.concat([layer, layer11], axis=3)
-  out11 = conv(1, layer, 1, act=tf.nn.leaky_relu)
-  print('out11', out11.shape)
+    self.out15 = conv(1, 1024, 1)
 
-  layer = conv_t((3,4), layer15, 256, padding='valid', strides=1, dropout=dropout, training=training)
-  layer = tf.concat([layer, layer14], axis=3)
-  layer = conv_t(4, layer, 256, dropout=dropout, training=training)
-  layer = tf.concat([layer, layer13], axis=3)
-  layer = conv_t(4, layer, 256, dropout=dropout, training=training)
-  layer = tf.concat([layer, layer12], axis=3)
-  layer = conv_t(4, layer, 256, dropout=dropout, training=training)
-  layer = tf.concat([layer, layer11], axis=3)
-  layer = conv_t(4, layer, 256, dropout=dropout, training=training)
-  layer = tf.concat([layer, layer10], axis=3)
-  out10 = conv(1, layer, 1, act=tf.nn.leaky_relu)
-  print('out10', out10.shape)
+    self.out14_0 = conv_t((3,4), 1024, 256, padding=0)
+    self.out14 = conv(1, 512, 1)
 
-  return out15, out14, out13, out12, out11, out10
+    self.out13_0 = conv_t((3,4), 1024, 256, padding=0)
+    self.out13_1 = conv_t(4, 512, 256)
+    self.out13 = conv(1, 512, 1)
 
-def model(input, targets, training, alpha, dropout=0.3):
+    self.out12_0 = conv_t((3,4), 1024, 256, padding=0)
+    self.out12_1 = conv_t(4, 512, 256)
+    self.out12_2 = conv_t(4, 512, 256)
+    self.out12 = conv(1, 512, 1)
 
-  target15, target14, target13, target12, target11, target10 = targets
+    self.out11_0 = conv_t((3,4), 1024, 256, padding=0)
+    self.out11_1 = conv_t(4, 512, 256)
+    self.out11_2 = conv_t(4, 512, 256)
+    self.out11_3 = conv_t(4, 512, 256)
+    self.out11 = conv(1, 512, 1)
 
-  print('input:', input.shape)
+    self.out10_0 = conv_t((3,4), 1024, 256, padding=0)
+    self.out10_1 = conv_t(4, 512, 256)
+    self.out10_2 = conv_t(4, 512, 256)
+    self.out10_3 = conv_t(4, 512, 256)
+    self.out10_4 = conv_t(4, 512, 256)
+    self.out10 = conv(1, 512, 1)
 
-  Encoded = encoder(input, training, dropout)
-  Decoded = decoder(Encoded, training, dropout)
+    self.optimizer = torch.optim.SGD([param for name, param in self.named_parameters() if 'vgg' not in name], lr=1e-4, momentum=0.9)
+    self.vgg_optimizer = torch.optim.SGD(self.vgg.parameters(), lr=1e-5, momentum=0.9)
 
-  out15, out14, out13, out12, out11, out10 = Decoded
+  def forward(self, input, dropout=0):
 
-  loss = 0
-  loss += abs_loss(out15, target15) / 16 / 12 * 10
-  loss += abs_loss(out14, target14) / 16 * 2
-  loss += abs_loss(out13, target13) / 4
-  loss += abs_loss(out12, target12) * 1
-  loss += abs_loss(out11, target11) * 4
-  loss += abs_loss(out10, target10) * 16
+    layer10 = conv_layer(self.layer10, self.vgg(input), act=leaky_relu, dropout=dropout)
 
-  L2_loss = tf.losses.get_regularization_loss() * 1e-4
+    layer11 = conv_layer(self.layer11_0, layer10, act=leaky_relu, dropout=dropout)
+    layer11 = conv_layer(self.layer11, layer11, act=leaky_relu, dropout=dropout)
 
-  loss += L2_loss
+    layer12 = conv_layer(self.layer12_0, layer11, act=leaky_relu, dropout=dropout)
+    layer12 = conv_layer(self.layer12, layer12, act=leaky_relu, dropout=dropout)
 
-  trainables = tf.trainable_variables()
+    layer13 = conv_layer(self.layer13_0, layer12, act=leaky_relu, dropout=dropout)
+    layer13 = conv_layer(self.layer13, layer13, act=leaky_relu, dropout=dropout)
 
-  train_vgg = tf.train.MomentumOptimizer(tf.maximum(alpha/2, 1e-7), 0.9).minimize(loss, var_list=[var for var in trainables if 'vgg' in var.name])
-  train_others = tf.train.MomentumOptimizer(alpha, 0.9).minimize(loss,
-                  var_list=[var for var in trainables if 'vgg' not in var.name])
-  train = tf.group(train_vgg, train_others)
+    layer14 = conv_layer(self.layer14_0, layer13, act=leaky_relu, dropout=dropout)
+    layer14 = conv_layer(self.layer14, layer14, act=leaky_relu, dropout=dropout)
 
-  D = [tf.nn.relu(out) for out in Decoded]
+    layer15 = conv_layer(self.layer15, layer14, act=leaky_relu, dropout=0)
 
-  m = L2_loss
-  return train, loss, D, m
+    out15 = conv_layer(self.out15, layer15, act=leaky_relu)
+
+    layer = conv_layer(self.out14_0, layer15, act=leaky_relu, dropout=dropout)
+    layer = concat([layer, layer14])
+    out14 = conv_layer(self.out14, layer, act=leaky_relu)
+
+    layer = conv_layer(self.out13_0, layer15, act=leaky_relu, dropout=dropout)
+    layer = concat([layer, layer14])
+    layer = conv_layer(self.out13_1, layer, act=leaky_relu, dropout=dropout)
+    layer = concat([layer, layer13])
+    out13 = conv_layer(self.out13, layer, act=leaky_relu)
+
+    layer = conv_layer(self.out12_0, layer15, act=leaky_relu, dropout=dropout)
+    layer = concat([layer, layer14])
+    layer = conv_layer(self.out12_1, layer, act=leaky_relu, dropout=dropout)
+    layer = concat([layer, layer13])
+    layer = conv_layer(self.out12_2, layer, act=leaky_relu, dropout=dropout)
+    layer = concat([layer, layer12])
+    out12 = conv_layer(self.out12, layer, act=leaky_relu)
+
+    layer = conv_layer(self.out11_0, layer15, act=leaky_relu, dropout=dropout)
+    layer = concat([layer, layer14])
+    layer = conv_layer(self.out11_1, layer, act=leaky_relu, dropout=dropout)
+    layer = concat([layer, layer13])
+    layer = conv_layer(self.out11_2, layer, act=leaky_relu, dropout=dropout)
+    layer = concat([layer, layer12])
+    layer = conv_layer(self.out11_3, layer, act=leaky_relu, dropout=dropout)
+    layer = concat([layer, layer11])
+    out11 = conv_layer(self.out11, layer, act=leaky_relu)
+
+    layer = conv_layer(self.out10_0, layer15, act=leaky_relu, dropout=dropout)
+    layer = concat([layer, layer14])
+    layer = conv_layer(self.out10_1, layer, act=leaky_relu, dropout=dropout)
+    layer = concat([layer, layer13])
+    layer = conv_layer(self.out10_2, layer, act=leaky_relu, dropout=dropout)
+    layer = concat([layer, layer12])
+    layer = conv_layer(self.out10_3, layer, act=leaky_relu, dropout=dropout)
+    layer = concat([layer, layer11])
+    layer = conv_layer(self.out10_4, layer, act=leaky_relu, dropout=dropout)
+    layer = concat([layer, layer10])
+    out10 = conv_layer(self.out10, layer, act=leaky_relu)
+
+    train_outs = [out15, out14, out13, out12, out11, out10]
+    monitored = None
+    return train_outs, monitored
+  def learning_rate(self, global_step):
+    if global_step < 25000:
+      lr = 1e-4
+    elif global_step < 50000:
+      lr = 1e-5
+    elif global_step < 75000:
+      lr = 1e-6
+    elif global_step < 100000:
+      lr = 1e-7
+    return lr
+  def train(self, global_step, train_inputs, train_targets):
+    random_dropout = 0 #random.random()*0.3
+
+    alpha = self.learning_rate(global_step)
+    alpha_vgg = alpha/2
+
+    self.vgg_optimizer.param_groups[0]['lr'] = alpha_vgg
+    self.optimizer.param_groups[0]['lr'] = alpha
+
+    train_targets = [torch.from_numpy(target).float().to(device) for target in train_targets]
+    train_inputs = torch.from_numpy(train_inputs).float().to(device).permute(0,3,1,2)
+
+    self.vgg_optimizer.zero_grad()
+    self.optimizer.zero_grad()
+
+    train_outs, train_m = self.forward(train_inputs, random_dropout)
+    train_loss = self.loss_fn(train_outs, train_targets)
+
+    train_loss.backward()
+
+    self.vgg_optimizer.step()
+    self.optimizer.step()
+
+    train_outs = [torch.nn.functional.relu(out).permute(0,2,3,1) for out in train_outs]
+    return train_outs, train_loss, train_m
+
+  def test(self, test_inputs, test_targets):
+
+    test_targets = [torch.from_numpy(target).float().to(device) for target in test_targets]
+    test_inputs = torch.from_numpy(test_inputs).float().to(device).permute(0,3,1,2)
+
+    test_outs, _ = self.forward(test_inputs, 0)
+    test_loss = self.loss_fn(test_outs, test_targets)
+
+    test_outs = [torch.nn.functional.relu(out).permute(0,2,3,1) for out in test_outs]
+    return test_outs, test_loss
+
+  def loss_fn(self, outputs, targets):
+    out15, out14, out13, out12, out11, out10 = outputs
+    target15, target14, target13, target12, target11, target10 = targets
+    loss = 0
+    loss += abs_loss(out15, target15) / 16 / 12 * 10
+    loss += abs_loss(out14, target14) / 16 * 2
+    loss += abs_loss(out13, target13) / 4
+    loss += abs_loss(out12, target12) * 1
+    loss += abs_loss(out11, target11) * 4
+    loss += abs_loss(out10, target10) * 16
+    return loss
+
+
+class Saver:
+  def __init__(self, model, path='./', max_to_keep=1):
+    if not path.endswith('/'):
+      path += '/'
+    if not os.path.exists(path):
+      os.makedirs(path)
+    self.model = model
+    self.path = path
+    self.max_to_keep = max_to_keep
+    self.checkpoint_path = path+'checkpoint.pkl'
+    if not os.path.exists(self.checkpoint_path):
+      checkpoints = []
+    else:
+      with open(self.checkpoint_path, 'rb') as f:
+        checkpoints = pickle.load(f)
+      if len(checkpoints) > max_to_keep:
+        checkpoints = checkpoints[-max_to_keep:]
+    with open(self.checkpoint_path, 'wb') as f:
+      pickle.dump(checkpoints, f)
+  def add_checkpoint(self, name):
+    with open(self.checkpoint_path, 'rb') as f:
+      checkpoints = pickle.load(f)
+
+    if len(checkpoints)==self.max_to_keep:
+      name_to_delete = checkpoints.pop(0)
+      self._delete_checkpoint(name_to_delete)
+    checkpoints.append(name)
+
+    with open(self.checkpoint_path, 'wb') as f:
+      pickle.dump(checkpoints, f)
+  def _delete_checkpoint(self, name_to_delete):
+    with open(self.checkpoint_path, 'rb') as f:
+      checkpoints = pickle.load(f)
+    if not name_to_delete in checkpoints and os.path.exists(self.path+name_to_delete):
+      os.remove(self.path+name_to_delete)
+  def last_checkpoint(self, n=-1):
+    with open(self.checkpoint_path, 'rb') as f:
+      checkpoints = pickle.load(f)
+    return checkpoints[-1]
+  def save(self, name, global_step):
+    torch.save({
+            'global_step': global_step,
+            'model_state_dict': self.model.state_dict(),
+            }, self.path+name)
+    self.add_checkpoint(name)
+  def restore(self, name):
+    print('INFO: Restoring parameters from', self.path+name)
+    checkpoint = torch.load(self.path+name)
+    self.model.load_state_dict(checkpoint['model_state_dict'])
+    return checkpoint['global_step']

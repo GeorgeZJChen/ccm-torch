@@ -1,7 +1,6 @@
 from __future__ import print_function, division
 import torch
 from torchvision import models as torch_models
-import tensorflow as tf
 import numpy as np
 from PIL import Image, ImageOps
 import string
@@ -78,15 +77,9 @@ def display_set_of_imgs(images, rows=2, size=0.5, name='0'):
   # plt.show()
 def id_generator(size=10, chars=string.ascii_uppercase + string.digits):
   return ''.join(random.choice(chars) for _ in range(size))
-def total_parameters(scope=None):
-  total_parameters = 0
-  for variable in tf.trainable_variables():
-      # shape is an array of tf.Dimension
-      shape = variable.get_shape()
-      variable_parameters = 1
-      for dim in shape:
-          variable_parameters *= dim.value
-      total_parameters += variable_parameters
+def total_parameters(net):
+  model_parameters = filter(lambda p: p.requires_grad, net.parameters())
+  total_parameters = sum([np.prod(p.size()) for p in model_parameters])
   return total_parameters
 def gaussian_kernel(shape=(32,32),sigma=5):
   """
@@ -106,16 +99,14 @@ def gaussian_kernel(shape=(32,32),sigma=5):
 def get_downsized_density_maps(density_map):
   ddmaps = []
   ratios = [8,16,32,64,128]
-  with tf.device('/gpu:0'):
-    ddmap = tf.layers.average_pooling2d(density_map, ratios[0], ratios[0], padding='same') * (ratios[0] * ratios[0])
-    ddmaps.append(tf.squeeze(ddmap,0))
-    if len(ratios)>1:
-      for i in range(len(ratios)-1):
-        ratio = int(ratios[i+1]/ratios[i])
-        ddmap = tf.layers.average_pooling2d(ddmap, ratio, ratio, padding='same') * (ratio * ratio)
-        ddmaps.append(tf.squeeze(ddmap,0))
-
-  return ddmaps, [tf.image.flip_left_right(ddmap) for ddmap in ddmaps]
+  ddmap = torch.nn.functional.avg_pool2d(density_map, ratios[0], ratios[0], padding=0) * (ratios[0] * ratios[0])
+  ddmaps.append(torch.squeeze(ddmap,0))
+  if len(ratios)>1:
+    for i in range(len(ratios)-1):
+      ratio = int(ratios[i+1]/ratios[i])
+      ddmap = torch.nn.functional.avg_pool2d(ddmap, ratio, stride=ratio, padding=0) * (ratio * ratio)
+      ddmaps.append(torch.squeeze(ddmap,0))
+  return ddmaps, [torch.flip(ddmap, [-1]) for ddmap in ddmaps]
 def random_size(rate_range=[1.1, 1.6], input_size=[384, 512], img_size=[None,None]):
   img_height, img_width = img_size
   input_height, input_width = input_size
@@ -149,23 +140,10 @@ def get_coords_map(coords, resize, img_size):
     new_coord[0] = min(coord[0], img_width-1)*resized_width/img_width
     new_coord[1] = min(coord[1], img_height-1)*resized_height/img_height
     new_coords.append(new_coord)
-  coords_map = np.zeros([1, resized_height, resized_width, 1])
+  coords_map = np.zeros([1, 1, resized_height, resized_width])
   for coord in new_coords:
-    coords_map[0][int(coord[1])][int(coord[0])][0] += 1
+    coords_map[0][0][int(coord[1])][int(coord[0])] += 1
   return coords_map
-def get_resized_image_and_density_map(img, coords_map, kernel, resize):
-  img_shape = img.get_shape().as_list()
-  img_height, img_width = img_shape[1], img_shape[2]
-  resized_height, resized_width = resize
-
-  with tf.device('/gpu:0'):
-    coords_map = tf.constant(coords_map, dtype=tf.float32)
-    density_map = tf.nn.conv2d(coords_map, kernel, strides=(1,1,1,1), padding='SAME')
-
-  img_height, img_width = img.shape[0], img.shape[1]
-  img = tf.image.resize_images(img, [resized_height, resized_width])
-  img = tf.cast(img, tf.uint8)
-  return img, density_map
 
 def preprocess_data(names, data_path, save_path='./processed', random_crop=None, input_size=[384, 512]
                     , test=False, test_dict=None):
@@ -182,25 +160,27 @@ def preprocess_data(names, data_path, save_path='./processed', random_crop=None,
   input_height, input_width = input_size
   prog = 0
   out_names = []
-  kernel = gaussian_kernel(shape=(48,48),sigma=10)
-  kernel = np.reshape(kernel, kernel.shape+(1,1))
+  kernel_size = 49
 
-  graph_get_dmap = tf.Graph()
-  with graph_get_dmap.as_default():
+  device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-    kernel = tf.constant(kernel, dtype=tf.float32)
+  class GetDensityMap(torch.nn.Module):
+    def __init__(self):
+      super(GetDensityMap, self).__init__()
+      kernel = gaussian_kernel(shape=(kernel_size,kernel_size),sigma=10)
+      kernel = np.reshape(kernel, (1,1)+kernel.shape)
+      self.kernel = torch.from_numpy(kernel).float().to(device)
+      self.padding = int((kernel_size-1)/2)
+    def forward(self, coords_map):
+      return torch.nn.functional.conv2d(coords_map, self.kernel, padding=self.padding)
+  class GetDownsizeDensityMaps(torch.nn.Module):
+    def __init__(self):
+      super(GetDownsizeDensityMaps, self).__init__()
+    def forward(self, density_map):
+      return get_downsized_density_maps(density_map)
 
-    tf_coords_map_p = tf.placeholder(tf.float32, [1,None,None,1])
-    tf_dmap = tf.nn.conv2d(tf_coords_map_p, kernel, strides=(1,1,1,1), padding='SAME')
-
-  graph_get_downsized_dmaps = tf.Graph()
-  with graph_get_downsized_dmaps.as_default():
-
-    tf_dmap_p = tf.placeholder(tf.float32, [1,input_height,input_width,1])
-    tf_ddmaps = get_downsized_density_maps(tf_dmap_p)
-
-  sess_get_dmap = tf.Session(graph=graph_get_dmap)
-  sess_get_downsized_dmaps = tf.Session(graph=graph_get_downsized_dmaps)
+  getDensityMap = GetDensityMap().to(device)
+  getDownsizeDensityMaps = GetDownsizeDensityMaps().to(device)
 
   for ni in tqdm(range(len(names))):
     name = data_path +  names[ni]
@@ -220,9 +200,8 @@ def preprocess_data(names, data_path, save_path='./processed', random_crop=None,
     resized_width = columns*input_width
     new_img = img.resize((resized_width, resized_height))
     coords_map = get_coords_map(coords, resize=[resized_height, resized_width], img_size=[img_height, img_width])
-    dmap = sess_get_dmap.run(tf_dmap, feed_dict={
-        tf_coords_map_p: coords_map
-    })
+    coords_map = torch.from_numpy(coords_map).float().to(device)
+    dmap = getDensityMap(coords_map)
     for row in range(rows):
       for col in range(columns):
         crop_top = input_height*row
@@ -231,15 +210,13 @@ def preprocess_data(names, data_path, save_path='./processed', random_crop=None,
         crop_right = crop_left + input_width
         img_crop = new_img.crop((crop_left, crop_top, crop_right, crop_bottom))
 
-        ddmaps, ddmaps_mirrored = sess_get_downsized_dmaps.run(tf_ddmaps, feed_dict={
-            tf_dmap_p: dmap[:, crop_top:crop_bottom, crop_left:crop_right]
-        })
+        ddmaps, ddmaps_mirrored = getDownsizeDensityMaps(dmap[:, :, crop_top:crop_bottom, crop_left:crop_right])
 
         imgs.append(img_crop)
-        dmaps.append(ddmaps)
+        dmaps.append(to_np(ddmaps))
         if not test:
           imgs.append(ImageOps.mirror(img_crop))
-          dmaps.append(ddmaps_mirrored)
+          dmaps.append(to_np(ddmaps_mirrored))
 
     if random_crop is not None and not (rows==1 and columns==1) and not test:
       for b in range(random_crop):
@@ -250,15 +227,14 @@ def preprocess_data(names, data_path, save_path='./processed', random_crop=None,
         crop_right = crop_left + input_width
         img_crop = new_img.crop((crop_left, crop_top, crop_right, crop_bottom))
 
-        ddmaps, ddmaps_mirrored = sess_get_downsized_dmaps.run(tf_ddmaps, feed_dict={
-            tf_dmap_p: dmap[:, crop_top:crop_bottom, crop_left:crop_right]
-        })
+        density_map_ = dmap[:, :, crop_top:crop_bottom, crop_left:crop_right]
+        ddmaps, ddmaps_mirrored = getDownsizeDensityMaps(density_map_)
 
         imgs.append(img_crop)
-        dmaps.append(ddmaps)
+        dmaps.append(to_np(ddmaps))
 
         imgs.append(ImageOps.mirror(img_crop))
-        dmaps.append(ddmaps_mirrored)
+        dmaps.append(to_np(ddmaps_mirrored))
 
     for i in range(len(imgs)):
       new_name = id_generator()
@@ -281,52 +257,47 @@ def preprocess_data(names, data_path, save_path='./processed', random_crop=None,
       }
   return out_names
 
-def set_pretrained(sess):
+def set_pretrained(net):
 
   vgg16 = torch_models.vgg16(pretrained=True)
-  torch_dict = vgg16.state_dict()
+  vgg_dict = vgg16.state_dict()
 
-  tf_p_ids = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-  torch_p_ids = [0, 2, 5, 7, 10, 12, 14, 17, 19, 21]
-  trainables = tf.trainable_variables()
-  for i in range(10):
-    tf_name_w = 'vgg_conv_'+str(tf_p_ids[i])+'/kernel:0'
-    tf_name_b = 'vgg_conv_'+str(tf_p_ids[i])+'/bias:0'
+  torch_dict = net.state_dict()
 
-    torch_name_w = 'features.'+str(torch_p_ids[i])+'.weight'
-    torch_name_b = 'features.'+str(torch_p_ids[i])+'.bias'
+  vgg_p_ids = [0, 2, 5, 7, 10, 12, 14, 17, 19, 21]
+  torch_p_ids = [0, 1, 3, 4, 6, 7, 8, 10, 11, 12]
+  for i in range(len(vgg_p_ids)):
+    torch_name_w = 'vgg.'+str(torch_p_ids[i])+'.0.weight'
+    torch_name_b = 'vgg.'+str(torch_p_ids[i])+'.0.bias'
 
-    var_w = [v for v in trainables if v.name == tf_name_w ][0]
-    sess.run(tf.assign(var_w, np.transpose(torch_dict[torch_name_w].data.numpy(), (2,3,1,0))))
+    vgg_name_w = 'features.'+str(vgg_p_ids[i])+'.weight'
+    vgg_name_b = 'features.'+str(vgg_p_ids[i])+'.bias'
 
-    var_b = [v for v in trainables if v.name == tf_name_b ][0]
-    sess.run(tf.assign(var_b, torch_dict[torch_name_b].data.numpy()))
-#   test_set_pretrained('CAC/vgg_conv_10/kernel:0', 'features.21.weight', torch_dict)
-def test_set_pretrained(tf_name, torch_name, torch_dict):
-  def check_equal4d(a, b):
-    for m in range(a.shape[0]):
-      for n in range(a.shape[1]):
-        for h in range(a.shape[2]):
-          for w in range(a.shape[3]):
-            if abs(a[m][n][h][w] - b[m][n][h][w])>0.00001:
-              print(a[m][n][h][w], b[m][n][h][w])
-              print('at',m,n,h,w)
-              return False
-    return True
-  def check_equal1d(a, b):
-    for m in range(a.shape[0]):
-      if abs(a[m] - b[m])>0.00001:
-        print(a[m], b[m])
-        print('at', m)
+    assert torch_name_w in torch_dict
+    assert torch_name_b in torch_dict
+    torch_dict[torch_name_w] = vgg_dict[vgg_name_w]
+    torch_dict[torch_name_b] = vgg_dict[vgg_name_b]
+  net.load_state_dict(torch_dict)
+#   test_set_pretrained('vgg.'+str(torch_p_ids[0])+'.0.weight', 'features.'+str(vgg_p_ids[0])+'.weight'
+#                       , net, vgg16)
+
+def test_set_pretrained(torch_name, vgg_name, torch_net, vgg16):
+  def check_equal(a, b):
+    a = a.flatten()
+    b = b.flatten()
+    if len(a) != len(b):
+        print('inequivalent length:', len(a), '!=', len(b))
         return False
+    for m in range(len(a)):
+        if abs(a[m]-b[m]) > 0.000001:
+            print(a[m], '!=', b[m], 'at', m)
+            return False
     return True
-  tf_data = [v for v in tf.trainable_variables() if v.name ==tf_name][0].read_value().eval()
-  torch_data = torch_dict[torch_name].data.numpy()
-  if len(tf_data.shape) == 1:
-    assert check_equal1d(tf_data, torch_data)
-  else:
-    torch_data = np.transpose(torch_data, (2,3,1,0))
-    assert check_equal4d(tf_data, torch_data)
+  vgg_dict = vgg16.state_dict()
+  torch_dict = torch_net.state_dict()
+  vgg_data = vgg_dict[vgg_name].data.numpy()
+  torch_data = torch_dict[torch_name].cpu().data.numpy()
+  assert check_equal(vgg_data, torch_data)
 def moving_average(new_val, last_avg, theta=0.95):
   return round((1-theta) * new_val + theta* last_avg, 2)
 def moving_average_array(new_vals, last_avgs, theta=0.95):
@@ -346,8 +317,10 @@ def denormalize(img):
   img += [0.485, 0.456, 0.406]
   img *= 255
   return img.astype('uint8')
-def next_batch_test(batch_size, names):
-  return next_batch(batch_size, names)
+def to_np(input):
+  if type(input) is list:
+    return [ tensor.cpu().detach().numpy() for tensor in input ]
+  return input.cpu().detach().numpy()
 def next_batch(batch_size, names):
   b = np.random.randint(0, len(names), [batch_size])
   _names = names[b]
@@ -371,4 +344,6 @@ def next_batch(batch_size, names):
     targets10.append(target10)
 
   targets = [targets15, targets14, targets13, targets12, targets11, targets10]
-  return np.array(normalize(imgs)), targets
+  targets = [np.array(target) for target in targets]
+  inputs = np.array(normalize(imgs))
+  return inputs, targets

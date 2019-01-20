@@ -1,16 +1,13 @@
 from __future__ import print_function, division
-import tensorflow as tf
 import os
 import random
 import pickle
 
 from functions import *
 
-
-def get_train_data_names(part):
+def get_data_names(part):
     if not (os.path.exists('./train_names.pkl') and os.path.exists('./test_names.pkl')):
         move_files('./datasets/shanghaitech/'+part+'/', part = part)
-        tf.reset_default_graph()
         train_names = preprocess_data(
             names=load_data_names(train=True, part= part),
             data_path='./datasets/shanghaitech/'+part+'/train/',
