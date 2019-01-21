@@ -25,7 +25,7 @@ net = Net()
 # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 # net = net.to(device)
 net = net.cuda()
-net = torch.nn.parallel.DistributedDataParallel(net)
+# net = torch.nn.parallel.DistributedDataParallel(net)
 
 
 # print('model put to', device)
