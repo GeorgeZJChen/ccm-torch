@@ -1,5 +1,6 @@
 from __future__ import print_function, division
 import torch
+import pickle
 import os
 
 def conv(kernel_size, in_channels, filters, padding=(1,1), strides=(1,1), dilation=1, name=None, act=None, dropout=None):
@@ -106,7 +107,7 @@ class Net(torch.nn.Module):
     for name, param in self.named_parameters():
       if param.requires_grad:
         if 'weight' in name:
-          torch.nn.init.xavier_uniform(param)
+          torch.nn.init.xavier_uniform_(param)
         if 'bias' in name:
           torch.nn.init.constant_(param, 0.0)
 
@@ -192,8 +193,8 @@ class Net(torch.nn.Module):
     self.vgg_optimizer.param_groups[0]['lr'] = alpha_vgg
     self.optimizer.param_groups[0]['lr'] = alpha
 
-    train_targets = [torch.from_numpy(target).float().to(device) for target in train_targets]
-    train_inputs = torch.from_numpy(train_inputs).float().to(device).permute(0,3,1,2)
+    train_targets = [torch.from_numpy(target).float().cuda() for target in train_targets]
+    train_inputs = torch.from_numpy(train_inputs).float().cuda().permute(0,3,1,2)
 
     self.vgg_optimizer.zero_grad()
     self.optimizer.zero_grad()
@@ -211,8 +212,8 @@ class Net(torch.nn.Module):
 
   def test(self, test_inputs, test_targets):
 
-    test_targets = [torch.from_numpy(target).float().to(device) for target in test_targets]
-    test_inputs = torch.from_numpy(test_inputs).float().to(device).permute(0,3,1,2)
+    test_targets = [torch.from_numpy(target).float().cuda() for target in test_targets]
+    test_inputs = torch.from_numpy(test_inputs).float().cuda().permute(0,3,1,2)
 
     test_outs, _ = self.forward(test_inputs, 0)
     test_loss = self.loss_fn(test_outs, test_targets)

@@ -22,9 +22,13 @@ os.environ['CUDA_VISIBLE_DEVICES']='0'
 print("Initialising Tensors")
 torch.cuda.empty_cache()
 net = Net()
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-net = net.to(device)
-print('model put to', device)
+# device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+# net = net.to(device)
+net = net.cuda()
+net = torch.nn.parallel.DistributedDataParallel(net)
+
+
+# print('model put to', device)
 print('total number of parameters:', total_parameters(net))
 
 saver = Saver(model=net, path='./model', max_to_keep=4)

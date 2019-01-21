@@ -106,7 +106,7 @@ def get_downsized_density_maps(density_map):
       ratio = int(ratios[i+1]/ratios[i])
       ddmap = torch.nn.functional.avg_pool2d(ddmap, ratio, stride=ratio, padding=0) * (ratio * ratio)
       ddmaps.append(torch.squeeze(ddmap,0))
-  return ddmaps, [torch.flip(ddmap, [-1]) for ddmap in ddmaps]
+  return ddmaps, [torch.flip(ddmap, [len(ddmap.size())-1]) for ddmap in ddmaps]
 def random_size(rate_range=[1.1, 1.6], input_size=[384, 512], img_size=[None,None]):
   img_height, img_width = img_size
   input_height, input_width = input_size
