@@ -33,7 +33,6 @@ best_saver = Saver(model=net, path='./best_model', max_to_keep=1)
 new_model = args.resume!='1'
 batch_size = 8
 part = 'A'
-best_result = 200
 
 if not os.path.exists('./output'):
   os.makedirs('./output')
@@ -47,6 +46,7 @@ if new_model:
   EMA = 0
   train_MAEs = None
   test_MAEs = None
+  best_result = 200
 else:
   global_step = saver.restore( saver.last_checkpoint() )
   EMA = 0
