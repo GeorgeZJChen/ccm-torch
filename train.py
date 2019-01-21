@@ -31,7 +31,7 @@ saver = Saver(model=net, path='./model', max_to_keep=4)
 best_saver = Saver(model=net, path='./best_model', max_to_keep=1)
 
 new_model = args.resume!='1'
-batch_size = 12
+batch_size = 8
 part = 'A'
 best_result = 200
 
@@ -52,6 +52,7 @@ else:
   EMA = 0
   train_MAEs = None
   test_MAEs = None
+  best_result = int(best_saver.last_checkpoint('./best_model').split('-')[1])
 
 try:
   for step in range(global_step, 100000):
