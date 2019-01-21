@@ -52,7 +52,7 @@ else:
   EMA = 0
   train_MAEs = None
   test_MAEs = None
-  best_result = int(best_saver.last_checkpoint('./best_model').split('-')[1])
+  best_result = int(best_saver.last_checkpoint().split('-')[1])
 
 try:
   for step in range(global_step, 100000):
