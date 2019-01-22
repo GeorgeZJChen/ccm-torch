@@ -275,7 +275,7 @@ class Saver:
       os.remove(self.path+name_to_delete)
   def last_checkpoint(self, n=-1):
     checkpoints = self._read_checkpoints()
-    return checkpoints[-1]
+    return checkpoints[n]
   def save(self, name, global_step):
     torch.save({
             'global_step': global_step,
