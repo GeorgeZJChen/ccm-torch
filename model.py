@@ -2,6 +2,7 @@ from __future__ import print_function, division
 import torch
 import pickle
 import os
+import random
 from threading import Thread
 
 def conv(kernel_size, in_channels, filters, padding=(1,1), strides=(1,1), dilation=1, name=None, act=None, dropout=None):
