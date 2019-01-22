@@ -176,16 +176,16 @@ class Net(torch.nn.Module):
     return train_outs, monitored
   def learning_rate(self, global_step):
     if global_step < 25000:
-      lr = 1e-4
-    elif global_step < 50000:
       lr = 1e-5
-    elif global_step < 75000:
+    elif global_step < 50000:
       lr = 1e-6
+    elif global_step < 75000:
+      lr = 5e-7
     elif global_step < 100000:
       lr = 1e-7
     return lr
   def train(self, global_step, train_inputs, train_targets):
-    random_dropout = 0 #random.random()*0.3
+    random_dropout = random.random()*0.3
 
     alpha = self.learning_rate(global_step)
     alpha_vgg = alpha/2
