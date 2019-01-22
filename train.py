@@ -100,9 +100,11 @@ try:
                  str(round(train_loss, 2))+', ', str(round(EMA,2)), '] || [EMAoMAE]:', str(train_MAEs),
                  '] || [monitor]:', str(train_m)]
       print(*log_str)
+      logging.info(' '.join(log_str))
 
       log_str = ['>>> TEST ', time.asctime()[10:20]+': i [', str(global_step), '] || [EMAoMAE]:', str(test_MAEs)]
       print(*log_str)
+      logging.info(' '.join(log_str))
 
       if step%200==0 and True:
 
