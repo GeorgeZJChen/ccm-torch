@@ -248,8 +248,7 @@ class Saver:
     if not os.path.exists(self.checkpoint_path):
       checkpoints = []
     else:
-      with open(self.checkpoint_path, 'rb') as f:
-        checkpoints = pickle.load(f)
+      checkpoints = self._read_checkpoints()
       if len(checkpoints) > max_to_keep:
         checkpoints = checkpoints[-max_to_keep:]
     self._write_checkpoints(checkpoints)
@@ -260,9 +259,12 @@ class Saver:
     thread = Thread(target=_write, args=(checkpoints))
     thread.start()
     thread.join()
-  def add_checkpoint(self, name):
+  def _read_checkpoints(self):
     with open(self.checkpoint_path, 'rb') as f:
       checkpoints = pickle.load(f)
+    return checkpoints
+  def add_checkpoint(self, name):
+    checkpoints = self._read_checkpoints()
     if len(checkpoints)==self.max_to_keep:
       name_to_delete = checkpoints.pop(0)
       self._delete_checkpoint(name_to_delete, checkpoints)
@@ -272,8 +274,7 @@ class Saver:
     if not name_to_delete in checkpoints and os.path.exists(self.path+name_to_delete):
       os.remove(self.path+name_to_delete)
   def last_checkpoint(self, n=-1):
-    with open(self.checkpoint_path, 'rb') as f:
-      checkpoints = pickle.load(f)
+    checkpoints = self._read_checkpoints()
     return checkpoints[-1]
   def save(self, name, global_step):
     torch.save({
