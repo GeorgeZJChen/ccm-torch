@@ -2,6 +2,7 @@ from __future__ import print_function, division
 import torch
 import pickle
 import os
+from threading import Thread
 
 def conv(kernel_size, in_channels, filters, padding=(1,1), strides=(1,1), dilation=1, name=None, act=None, dropout=None):
   if kernel_size==1:
@@ -251,19 +252,22 @@ class Saver:
         checkpoints = pickle.load(f)
       if len(checkpoints) > max_to_keep:
         checkpoints = checkpoints[-max_to_keep:]
-    with open(self.checkpoint_path, 'wb') as f:
-      pickle.dump(checkpoints, f)
+    self._write_checkpoints(checkpoints)
+  def _write_checkpoints(self, checkpoints):
+    def _write(checkpoints):
+      with open(self.checkpoint_path, 'wb') as f:
+        pickle.dump(checkpoints, f)
+    thread = Thread(target=_write, args=(checkpoints))
+    thread.start()
+    thread.join()
   def add_checkpoint(self, name):
     with open(self.checkpoint_path, 'rb') as f:
       checkpoints = pickle.load(f)
-
     if len(checkpoints)==self.max_to_keep:
       name_to_delete = checkpoints.pop(0)
       self._delete_checkpoint(name_to_delete, checkpoints)
     checkpoints.append(name)
-
-    with open(self.checkpoint_path, 'wb') as f:
-      pickle.dump(checkpoints, f)
+    self._write_checkpoints(checkpoints)
   def _delete_checkpoint(self, name_to_delete, checkpoints):
     if not name_to_delete in checkpoints and os.path.exists(self.path+name_to_delete):
       os.remove(self.path+name_to_delete)
