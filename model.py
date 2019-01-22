@@ -275,7 +275,7 @@ class Saver:
       os.remove(self.path+name_to_delete)
   def last_checkpoint(self, n=-1):
     checkpoints = self._read_checkpoints()
-    assert (n<0 and -n<len(checkpoints)) or (n>=0 and n<len(checkpoints)-1), "Invalid checkpoint index: "+str(n)
+    assert (n<0 and -n<=len(checkpoints)) or (n>=0 and n<len(checkpoints)-1), "Invalid checkpoint index: "+str(n)
     return checkpoints[n]
   def save(self, name, global_step):
     torch.save({
