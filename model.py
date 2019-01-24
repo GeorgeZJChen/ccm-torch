@@ -257,7 +257,7 @@ class Saver:
     def _write(checkpoints):
       with open(self.checkpoint_path, 'wb') as f:
         pickle.dump(checkpoints, f)
-    thread = Thread(target=_write, args=(checkpoints))
+    thread = Thread(target=_write, args=(checkpoints,))
     thread.start()
     thread.join()
   def _read_checkpoints(self):
