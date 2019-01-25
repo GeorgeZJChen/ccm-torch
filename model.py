@@ -103,8 +103,9 @@ class Net(torch.nn.Module):
     self.out10_4 = conv_t(4, 512, 256)
     self.out10 = conv(1, 512, 1)
 
-    self.optimizer = torch.optim.SGD([param for name, param in self.named_parameters() if 'vgg' not in name], lr=1e-4, momentum=0.9)
-    self.vgg_optimizer = torch.optim.SGD(self.vgg.parameters(), lr=1e-5, momentum=0.9)
+    self.optimizer = torch.optim.SGD([param for name, param in self.named_parameters() if 'vgg' not in name],
+            lr=1e-4, momentum=0.9, weight_decay=1e-4)
+    self.vgg_optimizer = torch.optim.SGD(self.vgg.parameters(), lr=1e-5, momentum=0.9, weight_decay=1e-4)
 
     for name, param in self.named_parameters():
       if param.requires_grad:
@@ -176,20 +177,11 @@ class Net(torch.nn.Module):
     train_outs = [out15, out14, out13, out12, out11, out10]
     monitored = None
     return train_outs, monitored
-  def learning_rate(self, global_step):
-    if global_step < 25000:
-      lr = 1e-5
-    elif global_step < 50000:
-      lr = 1e-6
-    elif global_step < 75000:
-      lr = 5e-7
-    elif global_step < 100000:
-      lr = 1e-7
-    return lr
-  def train(self, global_step, train_inputs, train_targets):
+  
+  def train(self, global_step, train_inputs, train_targets, learning_rate_scheduler):
     random_dropout = random.random()*0.3
 
-    alpha = self.learning_rate(global_step)
+    alpha = learning_rate_scheduler(global_step)
     alpha_vgg = alpha/2
 
     self.vgg_optimizer.param_groups[0]['lr'] = alpha_vgg

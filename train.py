@@ -17,7 +17,7 @@ parser.add_argument('resume', nargs='?', default='0')
 args = parser.parse_args()
 
 import os
-os.environ['CUDA_VISIBLE_DEVICES']='0'
+# os.environ['CUDA_VISIBLE_DEVICES']='0'
 
 print("Initialising Tensors")
 torch.cuda.empty_cache()
@@ -31,15 +31,15 @@ net = net.cuda()
 # print('model put to', device)
 print('total number of parameters:', total_parameters(net))
 
-saver = Saver(model=net, path='./model', max_to_keep=4)
-best_saver = Saver(model=net, path='./best_model', max_to_keep=1)
+if not os.path.exists('./output'):
+  os.makedirs('./output')
+saver = Saver(model=net, path='./output/model', max_to_keep=4)
+best_saver = Saver(model=net, path='./output/best_model', max_to_keep=1)
 
 new_model = args.resume!='1'
 batch_size = 8
 part = 'A'
 
-if not os.path.exists('./output'):
-  os.makedirs('./output')
 logging.basicConfig(filename='./output/train.log',level=logging.INFO)
 train_names, test_names = get_data_names(part=part)
 
@@ -58,12 +58,28 @@ else:
   test_MAEs = None
   best_result = float(best_saver.last_checkpoint().split('-')[1])
 
+def learning_rate_scheduler(global_step):
+  if global_step < 25000:
+    lr = 1e-4
+  elif global_step < 50000:
+    lr = 5e-5
+  elif global_step < 75000:
+    lr = 1e-5
+  elif global_step < 100000:
+    lr = 5e-6
+  return lr
+
 try:
   for step in range(global_step, 100000):
     train_inputs, train_targets = next_batch(batch_size, train_names)
 
-    train_D, train_loss, train_m = net.train(global_step, train_inputs , train_targets)
+    if step%25000==0 and not step==0:
+      best_saver.restore( best_saver.last_checkpoint() )
+
+    train_D, train_loss, train_m = net.train(global_step, train_inputs , train_targets, learning_rate_scheduler)
     train_loss = float(to_np(train_loss))
+
+    if
 
     if EMA == 0:
       EMA = train_loss
