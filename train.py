@@ -38,7 +38,7 @@ best_saver = Saver(model=net, path='./output/best_model', max_to_keep=1)
 
 new_model = args.resume!='1'
 batch_size = 8
-part = 'A'
+part = 'B'
 
 logging.basicConfig(filename='./output/train.log',level=logging.INFO)
 train_names, test_names = get_data_names(part=part)
