@@ -79,8 +79,6 @@ try:
     train_D, train_loss, train_m = net.train(global_step, train_inputs , train_targets, learning_rate_scheduler)
     train_loss = float(to_np(train_loss))
 
-    if
-
     if EMA == 0:
       EMA = train_loss
     else:
