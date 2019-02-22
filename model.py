@@ -177,7 +177,7 @@ class Net(torch.nn.Module):
     train_outs = [out15, out14, out13, out12, out11, out10]
     monitored = None
     return train_outs, monitored
-  
+
   def train(self, global_step, train_inputs, train_targets, learning_rate_scheduler):
     random_dropout = random.random()*0.3
 
@@ -253,8 +253,11 @@ class Saver:
     thread.start()
     thread.join()
   def _read_checkpoints(self):
-    with open(self.checkpoint_path, 'rb') as f:
-      checkpoints = pickle.load(f)
+    try:
+      with open(self.checkpoint_path, 'rb') as f:
+        checkpoints = pickle.load(f)
+    except EOFError:
+      checkpoints = []
     return checkpoints
   def add_checkpoint(self, name):
     checkpoints = self._read_checkpoints()
